@@ -1,182 +1,201 @@
-# Private List Check (ZAMA FHEVM)
+# Anonymous Teacher Rating · Zama FHE
 
-Privacy-preserving whitelist/blacklist membership check on Ethereum (Sepolia) using **Fully Homomorphic Encryption (FHE)** on Zama’s FHEVM.
+A minimalist dApp demonstrating **anonymous teacher evaluations** on the **Zama FHEVM**. Students submit **encrypted ratings**; only aggregate results (sum & count) are decryptable for the public so anyone can compute an average. Individual ratings remain private end‑to‑end.
 
-> **Goal:** let a user prove whether an address is **IN** or **OUT** of a confidential set **without revealing the address or the set**. Only an encrypted boolean is written on-chain; the UI publicly decrypts that boolean later. No raw addresses are ever logged to the console or sent to the chain.
+> **Network:** Sepolia
+> **Contract Address:** `0xDF3920F9500C29F6e8e1441f53A6d572c134Fce2`
+> **Relayer SDK:** `@zama-fhe/relayer-sdk-js` **0.2.0**
+> **Frontend entry:** `frontend/public/index.html`
 
 ---
 
 ## ✨ Features
 
-* **Private membership check** for an input address (encrypted `eaddress`).
-* **Encrypted set** of members stored on-chain; comparison uses `FHE.eq` **only**.
-* **Public result**: contract marks the result `makePubliclyDecryptable`, so anyone can call `publicDecrypt(...)`.
-* **Admin helpers** to add addresses to **whitelist** or **blacklist** (the UI encrypts the raw address locally before calling the contract).
-* **No address leakage**: UI logs only handles, proofs, tx hashes, and decrypted booleans.
-* **Pure static frontend** (no bundler needed) powered by **Zama Relayer SDK**.
+* **Private input** — Ratings encrypted in the browser using Zama Relayer SDK; ciphertext handles are the only thing sent on‑chain.
+* **Public aggregates** — Contract stores encrypted `sum` and `count`; owner can mark them as publicly decryptable.
+* **Dual decryption flows** — The UI first tries `publicDecrypt`, then gracefully falls back to `userDecrypt` (EIP‑712 signature) if needed.
+* **Clear developer logs** — Rich console logs for encryption/decryption (`[FHE] encrypt`, `decrypt(public)`, `decrypt(user)`) with timings and sizes.
+* **Owner tools** — Add teachers, ensure aggregates are public, basic checks to prevent on‑chain reverts.
+* **No 3rd‑party icon packs** — CSP and runtime guards block unwanted external CSS (e.g., font‑awesome) to avoid SRI warnings.
 
 ---
 
-## 🔧 Tech Stack
+## 🧱 Architecture
 
-* **Solidity** (Zama FHEVM):
-
-  * `import { FHE, ebool, eaddress, externalEaddress } from "@fhevm/solidity/lib/FHE.sol"`
-  * Access control with `FHE.allow/allowThis` and **public decrypt** via `FHE.makePubliclyDecryptable`.
-* **Frontend**: Vanilla HTML/JS + **Zama Relayer SDK** (official)
-
-  * `createInstance`, `createEncryptedInput`, `publicDecrypt`.
-  * Ethers v6 for wallet & contract calls.
-
-> Documentation: Zama Relayer SDK — [https://docs.zama.ai/protocol/relayer-sdk-guides/](https://docs.zama.ai/protocol/relayer-sdk-guides/)
-
----
-
-## 🏗️ How it works
-
-1. The UI takes an input **address** and encrypts it in the browser via the Relayer SDK, producing a **ciphertext handle** + **proof**.
-2. The contract iterates through its encrypted set (whitelist or blacklist) and uses **`FHE.eq`** to compare with the input `eaddress`.
-3. The contract emits an event with a **result handle** (encrypted boolean) and flags it as **publicly decryptable**.
-4. The UI invokes **`publicDecrypt`** on that handle to display **IN** or **OUT**.
-
-**Security notes**
-
-* Only the encrypted boolean is ever published. Raw addresses and the set members remain encrypted.
-* Console logging is trimmed to exclude raw addresses.
-
----
-
-## 🧱 Contract
-
-* **Network**: Sepolia (chainId `11155111`)
-* **Address**: `0x8Ac1d3E49A73F8328e43719dCF6fBfeF4405937B`
-* **KMS (Sepolia)**: `0x1364cBBf2cDF5032C47d8226a6f6FBD2AFCDacAC`
-* **Key methods (public result)**:
-
-  * `checkWhitelistPublic(bytes32 addrExt, bytes proof) → bytes32`
-  * `checkBlacklistPublic(bytes32 addrExt, bytes proof) → bytes32`
-  * `getLastResultHandle() → bytes32`
-* **Admin methods (UI encrypts the input address before calling):**
-
-  * `addToWhitelist(bytes32 addrExt, bytes proof)`
-  * `addToBlacklist(bytes32 addrExt, bytes proof)`
-* **Event:** `MembershipChecked(address user, bool isWhitelist, uint256 scannedCount, bytes32 resultHandle)`
-
-> Implementation follows Zama guidance: only `FHE.eq` over `eaddress`, **no** arithmetic on `eaddress`.
-
----
-
-## 📁 Repository Layout
+* **Solidity (FHEVM)** — Uses Zama's official Solidity library for encrypted types/ops. Aggregates are kept as encrypted integers.
+* **Relayer SDK (0.2.0)** — Handles client‑side encryption and decryption (public & user), plus proof generation.
+* **Frontend** — A single static page (`frontend/public/index.html`) with vanilla JS + Ethers v6.
 
 ```
-frontend/
-  public/
-    index.html        # Standalone UI (no build step)
-contracts/
-  PrivateListCheck.sol
-scripts/              # optional
-hardhat.config.ts     # if you use Hardhat for local tasks
+Browser (Relayer SDK)
+   ├─► encrypt rating → handles + proof
+   ├─► tx submitRating(id, handle, proof)
+   └─► (Later) publicDecrypt / userDecrypt(sum, count) → average
 ```
 
 ---
 
-## 🚀 Quick Start (Frontend)
+## 🧩 Main UI Actions
 
-**Prerequisites:** MetaMask, Node.js (optional for serving static files).
+* **Submit a Private Rating**
 
-### Option A — open as a static file
+  * Choose `Teacher ID` and a `Score` within the configured range (default 1..10).
+  * Client encrypts with `createEncryptedInput(...).add8(score).encrypt()` and sends `(handle, proof)` on‑chain.
 
-* Open `frontend/public/index.html` directly in a modern browser.
-* If your browser blocks crypto features from file://, use Option B below.
+* **View Public Average**
 
-### Option B — serve locally
+  * Fetches encrypted `sum` and `count` handles from the contract.
+  * Attempts `publicDecrypt([sumH, countH])`; falls back to `userDecrypt(...)` if needed.
+  * Displays average and a simple meter.
 
-```bash
-# from repo root
-npx serve frontend/public -p 5173    # or any static server
-# then open http://localhost:5173
-```
+* **Owner Tools**
 
-Alternatives:
-
-```bash
-# python
-python3 -m http.server --directory frontend/public 5173
-# or
-npx http-server frontend/public -p 5173 --cors
-```
-
-### Using the dApp
-
-1. Click **Connect MetaMask** (network auto-switches to **Sepolia** if needed).
-2. Choose **Whitelist** or **Blacklist** and paste an address to check (0x…).
-3. Press **Check** → the app encrypts & sends, then shows **IN** or **OUT**.
-4. You can later press **Decrypt Last Result** to re-decrypt the last emitted handle.
-
-### Admin (optional)
-
-* As the contract owner, paste an address into the **Admin** panel and use:
-
-  * **Add to Whitelist** or **Add to Blacklist** — the UI encrypts the address, then calls the contract.
+  * **Add Teacher**: `addTeacher(id, name)`.
+  * **Ensure Public**: `ensurePublic(id)` marks aggregates as publicly decryptable for the given teacher.
 
 ---
 
-## 🧩 Installation (full project)
+## 📦 Prerequisites
 
-```bash
-# 1) Clone
-git clone https://github.com/<your-org>/<your-repo>.git
-cd <your-repo>
+* Node.js 18+ and a static file server (e.g., `serve`, `http-server`, `vite preview`).
+* MetaMask (or any EIP‑1193 provider) connected to **Sepolia**.
 
-# 2) (optional) Install deps if you plan to compile/deploy contracts
-npm i
+---
 
-# 3) Frontend — run a static server
-npx serve frontend/public -p 5173
+## 🚀 Quick Start
+
+1. **Clone**
+
+   ```bash
+   git clone <your-repo-url>
+   cd <your-repo>/frontend/public
+   ```
+
+2. **Install a simple static server** (choose one):
+
+   ```bash
+   npm i -g serve            # or
+   npm i -g http-server      # or
+   npm i -g vite
+   ```
+
+3. **Run**
+
+   ```bash
+   # if using serve
+   serve -l 5173 .
+
+   # or http-server
+   http-server -p 5173 .
+
+   # or vite (no build; just preview a static dir)
+   vite preview --port 5173 --strictPort
+   ```
+
+4. **Open** `http://localhost:5173/` and click **Connect Wallet**.
+
+> The page sources the Relayer SDK from the Zama CDN and Ethers v6 from jsDelivr; nothing to build.
+
+---
+
+## ⚙️ Configuration
+
+* **Contract address** — defined at the top of `index.html`:
+
+  ```js
+  const CONTRACT_ADDRESS = "0xDF3920F9500C29F6e8e1441f53A6d572c134Fce2";
+  ```
+* **Relayer** — default:
+
+  ```js
+  const RELAYER_URL = "https://relayer.testnet.zama.cloud";
+  // SDK imports from: https://cdn.zama.ai/relayer-sdk-js/0.2.0/relayer-sdk-js.js
+  ```
+* **Rating bounds** — UI reads `minRating()`/`maxRating()` from the contract if available; otherwise defaults to `1..10`.
+
+---
+
+## 🔐 How It Works (FHE Flow)
+
+1. **Encrypt rating in the browser**
+
+   ```js
+   const buf = relayer.createEncryptedInput(CONTRACT_ADDRESS, user);
+   buf.add8(score); // score ∈ [1..10]
+   const { handles, inputProof } = await buf.encrypt();
+   // handles[0] and inputProof go to the contract
+   ```
+2. **Submit on‑chain**
+
+   ```js
+   await contract.submitRating(teacherId, handles[0], inputProof);
+   ```
+3. **Decrypt aggregates**
+
+   * Try `publicDecrypt([sumH, countH])` first.
+   * If not public, use `userDecrypt(...)` with an **EIP‑712** signature for private read access.
+
+---
+
+## 🧪 Developer Console Logs
+
+The UI prints detailed logs grouped under:
+
+* **`[FHE] encrypt → createInput`** — added values, proof size, first handle preview, timing.
+* **`[FHE] decrypt(public)`** — output format (array/object) and timing.
+* **`[FHE] decrypt(user)`** — EIP‑712 signature preview, decrypted keys, timing.
+* **`[FHE] average`** — final `sum`, `count`, computed `avg`.
+
+You can toggle verbosity by changing `const DEBUG = true` (still prints the FHE groups).
+
+---
+
+## 🧯 Troubleshooting
+
+* **MetaMask – `execution reverted`**
+
+  * Verify the `Teacher ID` exists before submitting (the UI checks via `teacherExists(id)`; ensure you pressed **Fetch** or used a valid ID).
+  * Owner‑only actions (add teacher / ensure public) require the owner account.
+
+* **Blocked font‑awesome / SRI warnings**
+
+  * The page intentionally blocks `cdnjs/font-awesome` via CSP + a runtime guard to prevent integrity warnings and noisy logs.
+
+* **Sepolia switch fails**
+
+  * MetaMask should prompt to switch. If not, add Sepolia manually (chainId `0xaa36a7`).
+
+* **Relayer errors**
+
+  * Ensure you’re online and can reach `https://relayer.testnet.zama.cloud`.
+  * If public decrypt fails, the UI auto‑tries user decrypt (sign a message).
+
+---
+
+## 📁 Project Layout
+
+```
+repo-root/
+└─ frontend/
+   └─ public/
+      └─ index.html     # Single‑file UI (no build step required)
 ```
 
-**Download as ZIP:**
-If this repo is on GitHub, you can download directly:
-
-```
-https://github.com/<your-org>/<your-repo>/archive/refs/heads/main.zip
-```
-
-> Replace `<your-org>/<your-repo>` with your namespace.
+If you later adopt a bundler (Vite/Next), keep the Relayer SDK version to **0.2.0** and **do not** import deprecated packages such as `@fhevm-js/relayer`.
 
 ---
 
-## 🔗 Relayer/Gateway (Testnet)
+## 🛡️ Security Notes
 
-* **Relayer URL**: `https://relayer.testnet.zama.cloud`
-* **Chain**: Sepolia `11155111`
-* **KMS**: `0x1364cBBf2cDF5032C47d8226a6f6FBD2AFCDacAC`
-
----
-
-## 🧪 Console Logging
-
-The console prints only:
-
-* encryption **handle** and **proof** length (never raw addresses),
-* transaction hash and receipt summary,
-* the decrypted boolean value.
-
-To disable logging entirely, search for the small `clog` helper in `index.html` and no-op the calls.
+* Uses **only** Zama’s official libraries and documented Relayer SDK flows.
+* Avoid FHE operations in `view/pure` functions on-chain.
+* `euint256`/`eaddress` restrictions: arithmetic is unsupported; use comparisons/bitwise ops only.
+* Prefer granting decryption rights purposefully (`makePubliclyDecryptable` for aggregates; `userDecrypt` for private reads).
 
 ---
 
-## ❗ Troubleshooting
+## 📝 License
 
-* **“Handle … is not allowed for public decryption”**
-  You likely called a non-public method. Use `checkWhitelistPublic` / `checkBlacklistPublic` from the UI.
-* **Invalid address**
-  The UI requires EIP-55 compatible `0x` address (40 hex chars). It validates before sending.
-* **Wrong network**
-  MetaMask must be on **Sepolia**. The app will try to switch automatically.
+MIT — see `LICENSE` (or adapt as needed).
 
----
 
-## ✅ License
-
-MIT — feel free to use and adapt.

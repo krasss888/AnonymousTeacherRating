@@ -3,257 +3,543 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Anonymous Teacher Rating · Zama FHE</title>
+
+    <!-- Required for relayer/wasm workers -->
     <meta http-equiv="Cross-Origin-Opener-Policy" content="same-origin" />
     <meta http-equiv="Cross-Origin-Embedder-Policy" content="require-corp" />
-    <title>Private List Check · ZAMA FHEVM (v2)</title>
+
+    <!-- 🔒 CSP: запрет сторонних стилей (в т.ч. cdnjs/font-awesome) -->
+    <meta http-equiv="Content-Security-Policy"
+          content="
+            default-src 'self';
+            script-src 'self' 'unsafe-inline' https://cdn.zama.ai https://cdn.jsdelivr.net 'wasm-unsafe-eval' blob:;
+            worker-src blob:;
+            connect-src *;
+            style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+            font-src https://fonts.gstatic.com data:;
+            img-src 'self' data: blob:;
+            object-src 'none';
+          ">
+
+    <!-- 🧹 Ранний блокиратор любых инъекций font-awesome/cdnjs -->
+    <script>
+      (function () {
+        const isFA = (n) =>
+          n && n.tagName === 'LINK' &&
+          /font-?awesome|cdnjs\.cloudflare\.com\/ajax\/libs\/font-awesome/i.test(n.href || '');
+        const kill = (n) => { try {
+          if (isFA(n)) { n.href = 'about:blank'; n.remove(); console.warn('[UI] Blocked unwanted FA link'); }
+        } catch {} };
+        // remove existing
+        document.querySelectorAll('link[rel="stylesheet"]').forEach(kill);
+        // intercept future additions
+        const mo = new MutationObserver((muts) => muts.forEach(m => m.addedNodes.forEach(kill)));
+        mo.observe(document.documentElement, { childList: true, subtree: true });
+        // patch DOM insertion
+        const ap = Node.prototype.appendChild, ib = Node.prototype.insertBefore;
+        Node.prototype.appendChild = function (c) { kill(c); return ap.call(this, c); };
+        Node.prototype.insertBefore = function (c, r) { kill(c); return ib.call(this, c, r); };
+      })();
+    </script>
+
+    <!-- Fonts only (без иконок) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+
     <style>
-      :root{
-        --bg: #faf7f2;           /* light sand */
-        --ink:#10121a;           /* near-black text */
-        --muted:#6b7280;         /* slate */
-        --card:#ffffff;          /* white cards */
-        --stroke:#e7e2da;        /* warm border */
-        --shadow: 0 10px 30px rgba(17,18,26,.08);
-        --radius:16px;
-        --brand:#7c3aed;         /* violet */
-        --accent:#f59e0b;        /* amber */
-        --ok:#10b981;            /* green */
-        --bad:#ef4444;           /* red */
+      :root {
+        --bg: #f6f7fb;
+        --panel: #ffffff;
+        --ink: #1d2030;
+        --muted: #6b7280;
+        --primary: #5d5fef;
+        --accent: #12b886;
+        --danger: #ef4444;
+        --border: #e6e8f0;
+        --shadow: 0 10px 30px rgba(13, 19, 33, 0.07);
+        --radius: 22px;
+        --mono: "Space Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        --sans: "Manrope", -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, sans-serif;
       }
-      *{box-sizing:border-box}
-      html,body{height:100%}
-      body{
-        font-family:'DM Sans', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-        color:var(--ink);
-        background:
-          radial-gradient(900px 500px at 0% 0%, #eae2ff40, transparent 60%),
-          radial-gradient(800px 600px at 100% 0%, #ffecc240, transparent 60%),
-          var(--bg);
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
         margin:0;
+        background:
+          radial-gradient(60vw 60vw at 10% -10%, #e5f8f1 0%, transparent 60%),
+          radial-gradient(80vw 80vw at 100% 0%, #e7e9ff 0%, transparent 60%),
+          var(--bg);
+        font-family: var(--sans); color: var(--ink);
       }
-      .container{max-width:1200px;margin:0 auto;padding:28px 16px 56px}
-      header{
-        display:grid;grid-template-columns:1fr auto;align-items:center;gap:20px;margin-bottom:22px;
-      }
-      .brand{display:flex;align-items:center;gap:14px}
-      .logo{width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,var(--brand),#a78bfa);box-shadow:var(--shadow)}
-      h1{font-size:clamp(22px,3.2vw,30px);margin:0;font-weight:800}
-      .sub{font-size:13px;color:var(--muted)}
-      .top-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-      .pill{font-size:12px;color:var(--muted);border:1px solid var(--stroke);padding:8px 10px;border-radius:999px;background:#fff7}
-      .btn{appearance:none;border:1px solid var(--stroke);background:linear-gradient(180deg,#fff,#f8f7f5);padding:12px 16px;border-radius:12px;cursor:pointer;font-weight:800;letter-spacing:.2px;box-shadow:var(--shadow);}
-      .btn:disabled{opacity:.5;cursor:not-allowed}
-      .btn.primary{background:linear-gradient(135deg,#a78bfa,#7c3aed);color:white;border:0}
-      .btn.accent{background:linear-gradient(135deg,#ffd166,#f59e0b);color:#251a00;border:0}
-      .btn.ok{background:linear-gradient(135deg,#34d399,#10b981);color:white;border:0}
-      .btn.bad{background:linear-gradient(135deg,#f87171,#ef4444);color:white;border:0}
-
-      /* GRID: radically new layout */
-      .grid{display:grid;grid-template-columns: 1.2fr .8fr; gap:18px}
-      .row{display:grid;grid-template-columns:1fr 1fr; gap:18px}
-      @media (max-width: 980px){ .grid{grid-template-columns:1fr} .row{grid-template-columns:1fr} }
-
-      .card{background:var(--card); border:1px solid var(--stroke); border-radius:var(--radius); padding:18px 18px 16px; box-shadow:var(--shadow)}
-      .card h2{font-size:16px;margin:0 0 12px 0;font-weight:800;display:flex;align-items:center;gap:10px}
-      .kbd{border:1px solid var(--stroke);background:#fbfaf9;padding:2px 6px;border-radius:6px;font-size:12px;color:var(--muted)}
-
-      .field{margin-bottom:12px}
-      .field label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
-      .input, select{width:100%;padding:12px 12px;border:1px solid var(--stroke);border-radius:12px;outline:none;background:white;font-size:15px}
-      .input:focus, select:focus{border-color:#c4b5fd; box-shadow:0 0 0 3px #c4b5fd40}
-      .row-actions{display:flex;gap:10px;flex-wrap:wrap}
-
-      .status{margin-top:10px;padding:12px;border-radius:12px;border:1px dashed var(--stroke);background:#fff7;color:var(--muted);font-weight:700}
-      .result{display:none;margin-top:10px;padding:14px;border-radius:12px;border:1px solid var(--stroke);text-align:center;font-weight:900}
-      .result.ok{color:var(--ok);border-color:#34d39980;background:#ecfdf5}
-      .result.bad{color:var(--bad);border-color:#f8717180;background:#fef2f2}
-
-      footer{margin-top:22px;color:var(--muted);font-size:12px;text-align:center}
-      .loading{position:relative}
-      .loading::after{content:"";position:absolute;right:12px;top:50%;transform:translateY(-50%);width:16px;height:16px;border-radius:50%;border:2px solid #00000022;border-top-color:#00000066;animation:spin 1s linear infinite}
-      @keyframes spin{to{transform:translateY(-50%) rotate(1turn)}}
-      code{background:#fbfaf9;border:1px solid var(--stroke);padding:2px 6px;border-radius:6px}
+      .nav { position: sticky; top: 0; z-index: 50; display:flex; align-items:center; justify-content:space-between; padding: 18px clamp(16px, 4vw, 40px); background: linear-gradient(180deg, rgba(255,255,255,0.85), rgba(255,255,255,0.65)); backdrop-filter: blur(10px); border-bottom:1px solid var(--border); }
+      .brand { display:flex; gap:12px; align-items:center; }
+      .logo { width:36px; height:36px; border-radius:10px; background: conic-gradient(from 180deg, #b2f5ea, #c7d2fe, #b2f5ea); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.06); display:grid; place-items:center; font-weight:800; color:#2b2e4a; }
+      .brand h1 { font-size: 18px; margin:0; letter-spacing: .2px; }
+      .brand small { display:block; color: var(--muted); font-weight:600; margin-top:2px; }
+      .connect { display:flex; align-items:center; gap:10px; padding:12px 14px; border-radius:14px; border:1px solid var(--border); background:#fff; box-shadow: var(--shadow); font-weight:700; color:#111827; cursor:pointer; transition:.2s ease; min-width:180px; justify-content:center; }
+      .connect:hover { transform: translateY(-1px); }
+      .pill { display:inline-flex; align-items:center; gap:8px; border-radius:999px; padding:6px 10px; font-size:12px; border:1px dashed var(--border); color: var(--muted); background:#fff; }
+      .container { max-width: 1100px; margin: 40px auto; padding: 0 20px; }
+      .grid { display:grid; grid-template-columns: 1.1fr .9fr; gap: 28px; }
+      @media (max-width: 980px){ .grid{ grid-template-columns: 1fr; } }
+      .card { background: var(--panel); border:1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px clamp(18px, 3vw, 28px); }
+      .card h2 { margin:0 0 12px; font-size:20px; letter-spacing:.2px; }
+      .card p.lead { color: var(--muted); margin-top:0; }
+      .row { display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+      .field { flex:1; min-width: 220px; }
+      label { display:block; font-size:12px; color:var(--muted); margin-bottom:8px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; }
+      input, select { width:100%; border:1px solid var(--border); border-radius:14px; padding:13px 14px; background:#fff; font: 600 14px var(--sans); color:#0f172a; outline:none; transition:.2s ease; box-shadow: inset 0 -2px 0 rgba(13,19,33,.03); }
+      input:focus, select:focus { border-color: #c7d2fe; box-shadow: 0 0 0 4px rgba(93,95,239,.08); }
+      .btn { appearance:none; border:0; border-radius:14px; padding:13px 16px; font-weight:800; letter-spacing:.3px; cursor:pointer; transition:.2s ease; }
+      .btn-primary { background: linear-gradient(180deg, #6366f1, #4f46e5); color:#fff; }
+      .btn-primary:hover { filter:brightness(1.05); transform: translateY(-1px); }
+      .btn-ghost { background:#fff; border:1px solid var(--border); color:#111827; }
+      .btn-ghost:hover { background:#f8fafc; }
+      .btn:disabled { opacity:.55; cursor:not-allowed; }
+      .meter { height: 8px; width:100%; background:#eef2ff; border-radius: 999px; overflow:hidden; }
+      .meter > span { display:block; height:100%; background:linear-gradient(90deg, #34d399, #a78bfa); width:0%; transition: width .4s ease; }
+      .mono { font-family: var(--mono); }
+      .muted { color: var(--muted); }
+      .badge { display:inline-flex; align-items:center; gap:8px; padding:8px 10px; border-radius:12px; border:1px solid var(--border); background:#fff; font-weight:700; }
+      .handles { font-size: 12px; color:#0f172a; background:#fbfbff; border:1px dashed #c7d2fe; padding:12px; border-radius:12px; word-break: break-all; }
+      .avgNumber { font-size: 44px; font-weight: 800; letter-spacing: -1px; }
+      .avgNumber small { font-weight:700; color:var(--muted); font-size:14px; }
+      .footer { margin: 40px auto 80px; text-align:center; color:var(--muted); }
+      .ok { color: #059669; }
+      .err { color: #ef4444; }
+      .warn { color:#b45309; }
     </style>
   </head>
   <body>
-    <div class="container">
-      <header>
-        <div class="brand">
-          <div class="logo"></div>
-          <div>
-            <h1>Private List Check</h1>
-            <div class="sub">ZAMA · FHEVM · Sepolia</div>
-          </div>
+    <header class="nav">
+      <div class="brand">
+        <div class="logo">🛡️</div>
+        <div>
+          <h1>Anonymous Teacher Rating</h1>
+          <small>Fully Homomorphic · Sepolia</small>
         </div>
-        <div class="top-actions">
-          <span class="pill">Network: <b id="netInfo">—</b></span>
-          <span class="pill">Account: <b id="acctInfo">—</b></span>
-          <button id="btnConnect" class="btn primary">Connect MetaMask</button>
-        </div>
-      </header>
+      </div>
+      <button id="btnConnect" class="connect"><span style="font-weight:900">Ξ</span><span>Connect Wallet</span></button>
+    </header>
 
-      <!-- NEW LAYOUT: main left column is the Private Check, right column stacks Contract + Admin -->
+    <main class="container">
       <section class="grid">
-        <!-- LEFT: Private Check (wide) -->
-        <div class="card">
-          <h2>Private Check <span class="kbd">encrypted</span></h2>
+        <!-- Submit rating -->
+        <article class="card">
+          <h2>Submit a Private Rating</h2>
+          <p class="lead">Pick a teacher, choose a score, and submit. Your rating stays encrypted; only totals are public.</p>
+
+          <div class="row" style="margin-top:12px">
+            <div class="field">
+              <label>Teacher ID</label>
+              <div class="row">
+                <input id="teacherId" type="number" min="1" placeholder="e.g. 1" />
+                <button id="btnFetchTeacher" class="btn btn-ghost" title="Load teacher name">🔎</button>
+              </div>
+              <div id="teacherName" class="muted" style="margin-top:6px">&nbsp;</div>
+            </div>
+            <div class="field">
+              <label>Score <span id="rangeLabel" class="muted"></span></label>
+              <div class="row">
+                <input id="rating" type="range" min="1" max="10" step="1" value="5" style="flex:1"/>
+                <input id="ratingVal" type="number" min="1" max="10" value="5" style="width:90px;"/>
+              </div>
+            </div>
+          </div>
+
+          <div class="row" style="margin-top:14px">
+            <button id="btnSubmit" class="btn btn-primary">🔒 Submit Encrypted Rating</button>
+            <span id="txStatus" class="pill mono">Idle</span>
+          </div>
+
+          <div style="margin-top:18px" class="muted">Contract: <span class="mono" id="addr"></span></div>
+        </article>
+
+        <!-- Public average -->
+        <article class="card">
+          <h2>Public Average</h2>
+          <p class="lead">Anyone can decrypt the encrypted sum & count via the Relayer and compute the average off-chain.</p>
+
           <div class="row">
             <div class="field">
-              <label>Address to check</label>
-              <input id="addr" class="input" placeholder="0x1234…" />
+              <label>Teacher ID</label>
+              <input id="teacherIdAgg" type="number" min="1" placeholder="e.g. 1" />
             </div>
-            <div class="field">
-              <label>Mode</label>
-              <select id="mode">
-                <option value="whitelist">Whitelist</option>
-                <option value="blacklist">Blacklist</option>
-              </select>
+            <div class="field" style="align-self:flex-end">
+              <button id="btnRefresh" class="btn btn-ghost">🔄 Refresh</button>
             </div>
           </div>
-          <div class="row-actions" style="margin:6px 0 2px">
-            <button id="btnCheck" class="btn accent" disabled>Check</button>
-            <button id="btnLast" class="btn" disabled>Decrypt Last Result</button>
-          </div>
-          <div id="status" class="status">Waiting for connection…</div>
-          <div id="result" class="result">—</div>
-        </div>
 
-        <!-- RIGHT: Contract info + Admin stacked -->
+          <div class="row" style="margin-top:12px">
+            <div class="badge"><span style="color:#34d399">◉</span><span>Sum & Count Handles</span></div>
+          </div>
+          <div class="handles mono" id="handles">—</div>
+
+          <div style="margin-top:14px" class="row">
+            <div class="field">
+              <div class="meter"><span id="meter"></span></div>
+            </div>
+            <div style="text-align:right; min-width:140px">
+              <div class="avgNumber" id="avg">–</div>
+              <small>Average score</small>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <!-- Owner tools -->
+      <section class="card" style="margin-top:28px">
+        <h2>Owner Tools</h2>
+        <p class="lead">Add new teachers or re-mark aggregates as publicly decryptable.</p>
+        <div id="ownerInfo" class="muted" style="margin-bottom:10px">Owner: —</div>
         <div class="row">
-          <div class="card">
-            <h2>Contract</h2>
-            <div class="field"><label>Address</label><div class="pill" style="display:inline-block;user-select:all">0x8Ac1d3E49A73F8328e43719dCF6fBfeF4405937B</div></div>
-            <div class="field"><label>Mode</label><div class="pill">KMS (Sepolia)</div></div>
-            <div class="field"><label>KMS</label><div class="pill" style="display:inline-block;user-select:all">0x1364cBBf2cDF5032C47d8226a6f6FBD2AFCDacAC</div></div>
-          </div>
-          <div class="card">
-            <h2>Admin (optional)</h2>
-            <div class="field">
-              <label>Address to add (UI encrypts it)</label>
-              <input id="adminHandle" class="input" placeholder="0xabc…" />
-            </div>
-            <div class="row-actions">
-              <button id="btnAddW" class="btn ok" disabled>Add to Whitelist</button>
-              <button id="btnAddB" class="btn bad" disabled>Add to Blacklist</button>
-            </div>
-            <div style="margin-top:8px;color:var(--muted);font-size:12px">Owner-only actions. The raw address never leaves the browser.</div>
-          </div>
+          <div class="field"><label>New Teacher ID</label><input id="newId" type="number" min="1" placeholder="e.g. 7"></div>
+          <div class="field"><label>Display Name</label><input id="newName" type="text" placeholder="e.g. Prof. Ada"></div>
+          <button id="btnAddTeacher" class="btn btn-ghost">👤➕ Add Teacher</button>
         </div>
+        <div class="row" style="margin-top:10px">
+          <div class="field"><label>Ensure Public for Teacher ID</label><input id="pubId" type="number" min="1" placeholder="e.g. 1"></div>
+          <button id="btnEnsurePublic" class="btn btn-ghost">📣 Ensure Public</button>
+        </div>
+        <div id="ownerHint" class="muted" style="margin-top:8px"></div>
       </section>
 
-      <section class="card" style="margin-top:18px">
-        <h2>How it works</h2>
-        <ol style="margin:0;padding-left:18px;color:var(--muted);line-height:1.6">
-          <li>Address is encrypted locally via ZAMA Relayer SDK.</li>
-          <li>Contract iterates over encrypted set and compares using <code>FHE.eq</code>.</li>
-          <li>Only encrypted boolean is published; UI requests <code>publicDecrypt</code>.</li>
-        </ol>
-      </section>
+      <p class="footer">Powered by <b>Zama FHE</b> · Relayer SDK 0.2.0 · Ethers v6</p>
+    </main>
 
-      <footer>
-        UI language: English · This page logs handles/proofs/tx hashes only (no raw addresses).
-      </footer>
-    </div>
-
-    <!-- Zama Relayer SDK (official) -->
-    <script type="module" crossorigin src="https://cdn.zama.ai/relayer-sdk-js/0.1.2/relayer-sdk-js.js"></script>
-    <!-- ethers v6 -->
-    <script type="module" crossorigin src="https://cdn.jsdelivr.net/npm/ethers@6.15.0/+esm"></script>
+    <!-- SDKs -->
+    <script type="module" crossorigin src="https://cdn.zama.ai/relayer-sdk-js/0.2.0/relayer-sdk-js.js"></script>
+    <script type="module" crossorigin src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/+esm"></script>
 
     <script type="module">
-      import { BrowserProvider, Contract, getAddress } from "https://cdn.jsdelivr.net/npm/ethers@6.15.0/+esm";
-      import { initSDK, createInstance, SepoliaConfig } from "https://cdn.zama.ai/relayer-sdk-js/0.1.2/relayer-sdk-js.js";
+      import { BrowserProvider, Contract } from "https://cdn.jsdelivr.net/npm/ethers@6.13.4/+esm";
+      import { initSDK, createInstance, SepoliaConfig, generateKeypair } from "https://cdn.zama.ai/relayer-sdk-js/0.2.0/relayer-sdk-js.js";
 
-      // ===== Console helpers (simple) =====
-      const clog = {
-        banner(){ console.log('Private List Check ready'); },
-        group:t=>console.log(`--- ${t} ---`),
-        end:()=>{}, table:o=>console.log(o), kv:(k,v)=>console.log(`${k}:`, v)
-      }; clog.banner();
-
-      // ===== DOM =====
-      const $ = (id)=>document.getElementById(id);
-      const btnConnect = $("btnConnect");
-      const btnCheck   = $("btnCheck");
-      const btnLast    = $("btnLast");
-      const btnAddW    = $("btnAddW");
-      const btnAddB    = $("btnAddB");
-      const addrInput  = $("addr");
-      const adminHandle= $("adminHandle");
-      const statusEl   = $("status");
-      const resultEl   = $("result");
-      const netInfo    = $("netInfo");
-      const acctInfo   = $("acctInfo");
-      const modeSel    = $("mode");
-
-      // ===== Config =====
-      const CONTRACT_ADDRESS = getAddress("0x8Ac1d3E49A73F8328e43719dCF6fBfeF4405937B");
+      const CONTRACT_ADDRESS = "0xDF3920F9500C29F6e8e1441f53A6d572c134Fce2";
       const RELAYER_URL = "https://relayer.testnet.zama.cloud";
-      const KMS_ADDRESS = getAddress("0x1364cBBf2cDF5032C47d8226a6f6FBD2AFCDacAC");
-      const CHAIN_HEX = "0xaa36a7"; // Sepolia
-      const CHAIN_ID  = 11155111n;
 
-      // ===== ABI =====
       const abi = [
-        { inputs:[{name:"addrExt",type:"bytes32"},{name:"proof",type:"bytes"}], name:"checkWhitelistPublic", outputs:[{name:"",type:"bytes32"}], stateMutability:"nonpayable", type:"function" },
-        { inputs:[{name:"addrExt",type:"bytes32"},{name:"proof",type:"bytes"}], name:"checkBlacklistPublic", outputs:[{name:"",type:"bytes32"}], stateMutability:"nonpayable", type:"function" },
-        { inputs:[{name:"addrExt",type:"bytes32"},{name:"proof",type:"bytes"}], name:"addToWhitelist", outputs:[], stateMutability:"nonpayable", type:"function" },
-        { inputs:[{name:"addrExt",type:"bytes32"},{name:"proof",type:"bytes"}], name:"addToBlacklist", outputs:[], stateMutability:"nonpayable", type:"function" },
-        { inputs:[], name:"getLastResultHandle", outputs:[{name:"",type:"bytes32"}], stateMutability:"view", type:"function" },
-        { anonymous:false, inputs:[
-            {indexed:true,name:"user",type:"address"},
-            {indexed:false,name:"isWhitelist",type:"bool"},
-            {indexed:false,name:"scannedCount",type:"uint256"},
-            {indexed:false,name:"resultHandle",type:"bytes32"}
-          ], name:"MembershipChecked", type:"event" }
+        { inputs: [], name: "version", outputs: [{ type: "string" }], stateMutability: "pure", type: "function" },
+        { inputs: [{ name: "teacherId", type: "uint256" }, { name: "ratingExt", type: "bytes32" }, { name: "proof", type: "bytes" }], name: "submitRating", outputs: [], stateMutability: "nonpayable", type: "function" },
+        { inputs: [{ name: "teacherId", type: "uint256" }], name: "getAggregateHandles", outputs: [{ name: "sumH", type: "bytes32" }, { name: "countH", type: "bytes32" }], stateMutability: "view", type: "function" },
+        { inputs: [{ name: "teacherId", type: "uint256" }], name: "teacherName", outputs: [{ type: "string" }], stateMutability: "view", type: "function" },
+        { inputs: [{ name: "teacherId", type: "uint256" }], name: "teacherExists", outputs: [{ type: "bool" }], stateMutability: "view", type: "function" },
+        { inputs: [{ name: "teacherId", type: "uint256" }], name: "ensurePublic", outputs: [], stateMutability: "nonpayable", type: "function" },
+        { inputs: [{ name: "teacherId", type: "uint256" }, { name: "name", type: "string" }], name: "addTeacher", outputs: [], stateMutability: "nonpayable", type: "function" },
+        { inputs: [], name: "owner", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
+        { inputs: [], name: "minRating", outputs: [{ type: "uint8" }], stateMutability: "view", type: "function" },
+        { inputs: [], name: "maxRating", outputs: [{ type: "uint8" }], stateMutability: "view", type: "function" },
       ];
 
-      // ===== State =====
-      let provider, signer, user, relayer, contract; let lastHandle = null;
+      // ====== Elements ======
+      const $ = (id) => document.getElementById(id);
+      const els = {
+        btnConnect: $("btnConnect"),
+        addr: $("addr"),
+        txStatus: $("txStatus"),
+        teacherId: $("teacherId"),
+        btnFetchTeacher: $("btnFetchTeacher"),
+        teacherName: $("teacherName"),
+        rating: $("rating"),
+        ratingVal: $("ratingVal"),
+        rangeLabel: $("rangeLabel"),
+        btnSubmit: $("btnSubmit"),
+        teacherIdAgg: $("teacherIdAgg"),
+        btnRefresh: $("btnRefresh"),
+        handles: $("handles"),
+        avg: $("avg"),
+        meter: $("meter"),
+        ownerInfo: $("ownerInfo"),
+        ownerHint: $("ownerHint"),
+        newId: $("newId"), newName: $("newName"), btnAddTeacher: $("btnAddTeacher"),
+        pubId: $("pubId"), btnEnsurePublic: $("btnEnsurePublic"),
+      };
 
-      // ===== UI helpers =====
-      const setStatus = (t)=> statusEl.textContent=t;
-      function showResult(ok){ resultEl.style.display='block'; resultEl.classList.remove('ok','bad'); resultEl.classList.add(ok?'ok':'bad'); resultEl.textContent = ok? '✅ IN LIST' : '❌ OUT OF LIST'; }
-      const setLoading = (el,on)=> el && el.classList.toggle('loading', !!on);
-      function refreshButtons(){
-        const okAddr  = /^0x[0-9a-fA-F]{40}$/.test((addrInput.value||'').trim());
-        const okAdmin = /^0x[0-9a-fA-F]{40}$/.test((adminHandle.value||'').trim());
-        if (btnCheck) btnCheck.disabled = !signer || !okAddr;
-        if (btnAddW) btnAddW.disabled = !signer || !okAdmin;
-        if (btnAddB) btnAddB.disabled = !signer || !okAdmin;
+      // ====== State & helpers ======
+      let provider, signer, user, contract, relayer;
+
+      async function nextNonce(){
+        try { return await (signer?.getNonce?.("pending") ?? provider.getTransactionCount(user, "pending")); }
+        catch { return undefined; }
       }
-      function validateAddress(raw){ const s=(raw||'').trim(); if(!s) throw new Error('Enter an address'); if(!/^0x[0-9a-fA-F]{40}$/.test(s)) throw new Error('Invalid address format (0x + 40 hex)'); return getAddress(s); }
-      addrInput.addEventListener('input', refreshButtons); adminHandle.addEventListener('input', refreshButtons);
 
-      // ===== Network guards =====
-      async function ensureSepolia(){ const id = await window.ethereum.request({ method:'eth_chainId' }); if (BigInt(id)!==CHAIN_ID){ await window.ethereum.request({ method:'wallet_switchEthereumChain', params:[{chainId: CHAIN_HEX}] }); } }
+      const DEBUG = true;
+      const stamp = () => new Date().toISOString();
+      function dlog(...args){ if (DEBUG) console.log(`%c[FHE-UI ${stamp()}]`, 'color:#6b7280', ...args); }
 
-      // ===== Relayer helpers =====
-      function addAddressToBuf(buf, address){ if (typeof buf.addAddress==='function'){ buf.addAddress(address); return 'addAddress'; } if (typeof buf.add160==='function'){ buf.add160(BigInt(address)); return 'add160'; } throw new Error('Relayer SDK missing addAddress/add160'); }
-      const toHex = (u8)=> '0x'+Array.from(u8).map(b=>b.toString(16).padStart(2,'0')).join('');
-      async function encryptAddress(address){ clog.group('ENCRYPTION'); const buf = relayer.createEncryptedInput(CONTRACT_ADDRESS, user); const used = addAddressToBuf(buf, address); clog.kv('inputMethod', used); const { handles, inputProof } = await buf.encrypt(); const handle = toHex(handles[0]); const proof = toHex(inputProof); clog.table({ handle, proofBytes: inputProof.length, proofPreview: proof.slice(0,66)+'…' }); clog.end(); return { handle, proof }; }
+      // ====== Verbose crypto logging helpers ======
+      function kb(n){ return (n/1024).toFixed(2)+' KB'; }
+      function ms(start){ return (performance.now()-start).toFixed(1)+'ms'; }
+      function preview(s, n=12){ s=String(s); return s.length>2*n ? s.slice(0,n)+'…'+s.slice(-n) : s; }
+      function asBigint(x){ try{ return BigInt(x); }catch{ return undefined; } }
 
-      async function callCheckPublic(mode, handle, proof){ const fn = mode==='blacklist' ? 'checkBlacklistPublic' : 'checkWhitelistPublic'; clog.group('CALL (public)'); clog.table({ fn, handle, proofLen: proof.length }); const tx = await contract[fn](handle, proof, { gasLimit: 3_000_000 }); clog.kv('txHash', tx.hash); const receipt = await tx.wait(); clog.table({ blockNumber: receipt.blockNumber, gasUsed: receipt.gasUsed.toString(), status: receipt.status }); let evtHandle=null; for (const lg of receipt.logs){ try{ const parsed=contract.interface.parseLog(lg); if(parsed && parsed.name==='MembershipChecked'){ evtHandle = parsed.args.resultHandle; clog.kv('event.handle', evtHandle); break; } }catch{} } if(!evtHandle){ try{ evtHandle = await contract.getLastResultHandle(); clog.kv('getLastResultHandle()', evtHandle); }catch{} } clog.end(); if(!evtHandle) throw new Error('No public handle returned by contract'); lastHandle = evtHandle; return evtHandle; }
+      const FHELOG = {
+        encStart(meta){ console.groupCollapsed('%c[FHE] encrypt → createInput','color:#2563eb', meta); },
+        encAdd(tag, val){ console.log('%c[FHE]   add','color:#2563eb', tag, val); },
+        encDone(hs, proofBytes, dtMs){
+          const first = hs?.[0];
+          console.log('%c[FHE] encrypt() done','color:#2563eb',
+            { handles: hs, firstHandle: first ? preview(first) : '(none)', proofBytes, size: kb(proofBytes), time: dtMs });
+          console.groupEnd();
+        },
+        submit(txhash){ console.log('%c[FHE] tx','color:#6b7280', txhash); },
 
-      async function decryptPublic(handle){ clog.group('DECRYPT (public)'); const out = await relayer.publicDecrypt([handle]); const value = Array.isArray(out) ? out[0] : out[handle]; clog.table({ handle, decrypted: String(value) }); clog.end(); return (typeof value==='bigint') ? (value===1n) : (Number(value)===1); }
+        decPublicStart(handles){ console.groupCollapsed('%c[FHE] decrypt(public)','color:#059669', handles); },
+        decPublicDone(out, dtMs){ console.log('%c[FHE] publicDecrypt OK','color:#059669', { out, time: dtMs }); console.groupEnd(); },
 
-      // ===== Connect =====
-      btnConnect.addEventListener('click', async ()=>{ try{ setLoading(btnConnect,true); if(!window.ethereum) throw new Error('MetaMask not found'); await ensureSepolia(); provider = new BrowserProvider(window.ethereum); await provider.send('eth_requestAccounts', []); signer = await provider.getSigner(); user = await signer.getAddress(); const net = await provider.getNetwork(); netInfo.textContent = `Sepolia (${net.chainId.toString()})`; acctInfo.textContent = `${user.slice(0,6)}…${user.slice(-4)}`; const code = await provider.getCode(KMS_ADDRESS); if(code==='0x') throw new Error('KMS contract not found'); await initSDK(); relayer = await createInstance({ ...SepoliaConfig, network: window.ethereum, relayerUrl: RELAYER_URL, debug:true }); contract = new Contract(CONTRACT_ADDRESS, abi, signer); setStatus('Connected. Ready to check.'); btnLast.disabled = false; refreshButtons(); clog.group('SETUP'); console.log('Ready'); clog.end(); }catch(e){ console.error(e); setStatus('❌ '+e.message); } finally{ setLoading(btnConnect,false); } });
+        decUserStart(meta){ console.groupCollapsed('%c[FHE] decrypt(user)','color:#10b981', meta); },
+        decUserSig(sig){ console.log('%c[FHE]   EIP-712 sig','color:#10b981', { len: sig.length, preview: preview(sig) }); },
+        decUserDone(out, dtMs){ console.log('%c[FHE] userDecrypt OK','color:#10b981', { out, time: dtMs }); console.groupEnd(); },
 
-      // ===== Actions =====
-      btnCheck.addEventListener('click', async ()=>{ try{ if(!signer || !relayer) throw new Error('Connect wallet first'); const address = validateAddress(addrInput.value); setLoading(btnCheck,true); setStatus('Encrypting & sending…'); resultEl.style.display='none'; const { handle, proof } = await encryptAddress(address); const publicHandle = await callCheckPublic(modeSel.value, handle, proof); const ok = await decryptPublic(publicHandle); showResult(ok); setStatus('✅ Done'); }catch(e){ console.error(e); setStatus('❌ '+e.message); } finally{ setLoading(btnCheck,false); } });
+        average(sum,count,avg){
+          console.log('%c[FHE] average','color:#334155', { sum: String(sum), count: String(count), avg });
+        }
+      };
 
-      btnLast.addEventListener('click', async ()=>{ try{ if(!relayer) throw new Error('Relayer not ready'); if(!lastHandle) throw new Error('No handle cached yet'); setLoading(btnLast,true); setStatus('Decrypting last result…'); const ok = await decryptPublic(lastHandle); showResult(ok); setStatus('✅ Done'); }catch(e){ console.error(e); setStatus('❌ '+e.message); } finally{ setLoading(btnLast,false); } });
+      function formatAddr(a){ return a ? a.slice(0,6) + "…" + a.slice(-4) : "—"; }
+      function setBusy(el, busy){ busy ? el.setAttribute("disabled", "") : el.removeAttribute("disabled"); }
+      function setStatus(txt, ok=true, warn=false){ els.txStatus.textContent = txt; els.txStatus.className = `pill mono ${ok? (warn? 'warn' : 'ok') : 'err'}`; }
+      function syncRange(){ els.ratingVal.value = els.rating.value; }
+      function syncNumber(){ els.rating.value = els.ratingVal.value; }
 
-      btnAddW.addEventListener('click', async ()=>{ try{ if(!contract) throw new Error('Connect first'); const address = validateAddress(adminHandle.value); setLoading(btnAddW,true); const { handle, proof } = await encryptAddress(address); clog.group('ADMIN addToWhitelist'); clog.table({ handle, proofLen: proof.length }); const tx = await contract.addToWhitelist(handle, proof, { gasLimit: 3_000_000 }); console.log('txHash', tx.hash); await tx.wait(); clog.end(); setStatus('✅ Added to whitelist (encrypted)'); }catch(e){ console.error(e); setStatus('❌ '+e.message); } finally{ setLoading(btnAddW,false); } });
+      $("addr") && ( $("addr").textContent = CONTRACT_ADDRESS );
+      els.teacherIdAgg.value = 1;
+      syncRange();
+      els.rating.addEventListener("input", syncRange);
+      els.ratingVal.addEventListener("input", syncNumber);
 
-      btnAddB.addEventListener('click', async ()=>{ try{ if(!contract) throw new Error('Connect first'); const address = validateAddress(adminHandle.value); setLoading(btnAddB,true); const { handle, proof } = await encryptAddress(address); clog.group('ADMIN addToBlacklist'); clog.table({ handle, proofLen: proof.length }); const tx = await contract.addToBlacklist(handle, proof, { gasLimit: 3_000_000 }); console.log('txHash', tx.hash); await tx.wait(); clog.end(); setStatus('✅ Added to blacklist (encrypted)'); }catch(e){ console.error(e); setStatus('❌ '+e.message); } finally{ setLoading(btnAddB,false); } });
+      // ====== Wire up ======
+      els.btnConnect.addEventListener("click", connect);
+      els.btnFetchTeacher.addEventListener("click", fetchTeacher);
+      els.btnSubmit.addEventListener("click", submitRating);
+      els.btnRefresh.addEventListener("click", refreshAgg);
+      els.btnAddTeacher.addEventListener("click", addTeacher);
+      els.btnEnsurePublic.addEventListener("click", ensurePublic);
 
-      refreshButtons();
-      if (window.ethereum?.on){ window.ethereum.on('chainChanged', ()=> window.location.reload()); window.ethereum.on('accountsChanged', ()=> window.location.reload()); }
+      function parseRevert(err){
+        const s = err?.shortMessage || err?.reason || err?.message || String(err);
+        if (s.includes('Teacher not found')) return 'Teacher not found';
+        if (s.includes('Not owner') || s.includes('not owner')) return 'Only owner can perform this action';
+        if (s.includes('execution reverted')) return 'Execution reverted (check inputs and permissions)';
+        return s;
+      }
+
+      // ====== Connect ======
+      async function connect(){
+        try{
+          setBusy(els.btnConnect, true);
+          if(!window.ethereum) throw new Error("MetaMask not found");
+          provider = new BrowserProvider(window.ethereum);
+          await provider.send("eth_requestAccounts", []);
+          const net = await provider.getNetwork();
+          dlog('network', net.chainId.toString());
+          if(net.chainId !== 11155111n){ await provider.send("wallet_switchEthereumChain", [{ chainId: "0xaa36a7" }]); }
+          signer = await provider.getSigner();
+          user = await signer.getAddress();
+          contract = new Contract(CONTRACT_ADDRESS, abi, signer);
+
+          await initSDK();
+          relayer = await createInstance({ ...SepoliaConfig, relayerUrl: RELAYER_URL, network: window.ethereum });
+          console.log('%c[FHE] relayer ready','color:#0ea5e9', { url: RELAYER_URL, network: 'Sepolia' });
+
+          els.btnConnect.innerHTML = `<span style="color:#10b981">✅</span> ${formatAddr(user)}`;
+          els.ownerInfo.textContent = `Owner: …`;
+
+          // Bounds (fallback 1..10)
+          let min=1, max=10; try { min = Number(await contract.minRating()); } catch{}; try { max = Number(await contract.maxRating()); } catch{};
+          els.rating.min = String(min); els.rating.max = String(max);
+          els.ratingVal.min = String(min); els.ratingVal.max = String(max);
+          els.rangeLabel.textContent = `(${min}..${max})`;
+
+          // Owner section
+          try {
+            const owner = await contract.owner();
+            const isOwner = owner.toLowerCase()===user.toLowerCase();
+            els.ownerInfo.textContent = `Owner: ${formatAddr(owner)} ${isOwner?'(you)':''}`;
+            els.btnAddTeacher.disabled=!isOwner; els.btnEnsurePublic.disabled=!isOwner;
+            els.ownerHint.textContent = isOwner? 'You can add teachers or re-publish aggregates.' : 'Connect the owner wallet to manage.';
+          } catch {}
+
+          setStatus("Connected", true);
+        } catch(e){ console.error(e); setStatus(parseRevert(e), false); }
+        finally { setBusy(els.btnConnect, false); }
+      }
+
+      // ====== Read teacher ======
+      async function fetchTeacher(){
+        try{
+          const id = BigInt(els.teacherId.value || 0);
+          if(id<=0n) throw new Error("Enter a valid teacher id");
+          const exists = await contract.teacherExists(id);
+          if(!exists){ els.teacherName.innerHTML = `<span class='err'>No such teacher</span>`; return; }
+          const name = await contract.teacherName(id);
+          els.teacherName.textContent = name && name.length? name : "(no name set)";
+        } catch(e){ els.teacherName.innerHTML = `<span class='err'>${parseRevert(e)}</span>`; }
+      }
+
+      // ====== Submit encrypted rating ======
+      async function submitRating(){
+        try{
+          setBusy(els.btnSubmit, true);
+          const id = BigInt(els.teacherId.value || 0);
+          if(id<=0n) throw new Error("Enter a valid teacher id");
+          const exists = await contract.teacherExists(id);
+          if(!exists){ setStatus('Teacher not found', false); return; }
+
+          const score = Number(els.rating.value);
+          if(Number.isNaN(score) || score<Number(els.rating.min) || score>Number(els.rating.max)){
+            throw new Error("Score out of bounds");
+          }
+
+          dlog("submitRating:start", { teacherId: id.toString(), score });
+
+          setStatus("Encrypting…", true);
+          const t0 = performance.now();
+          FHELOG.encStart({ contract: CONTRACT_ADDRESS, teacherId: id.toString() });
+
+          const buf = relayer.createEncryptedInput(CONTRACT_ADDRESS, user);
+          FHELOG.encAdd('add8(score)', score);
+          buf.add8(score);
+
+          const { handles, inputProof } = await buf.encrypt();
+          FHELOG.encDone(handles, inputProof?.length ?? 0, ms(t0));
+
+          const h = handles[0];
+          dlog("encrypt:firstHandle", h);
+
+          setStatus("Submitting…", true);
+          await contract.submitRating.staticCall(id, h, inputProof);
+          dlog("staticCall:ok");
+          const tx = await contract.submitRating(id, h, inputProof, { nonce: await nextNonce() });
+          FHELOG.submit(tx.hash);
+          const rcpt = await tx.wait();
+          dlog("tx:mined", { blockNumber: rcpt.blockNumber, gasUsed: rcpt.gasUsed?.toString?.() });
+          setStatus("Rating submitted ✔", true);
+        } catch(e){ setStatus(parseRevert(e), false); }
+        finally { setBusy(els.btnSubmit, false); }
+      }
+
+      // ====== Read aggregates, decrypt, display average ======
+      async function refreshAgg(){
+        try{
+          setBusy(els.btnRefresh, true);
+          const id = BigInt(els.teacherIdAgg.value || 0);
+          if(id<=0n) throw new Error("Enter a valid teacher id");
+          const exists = await contract.teacherExists(id);
+          if(!exists){ els.handles.textContent = 'No such teacher'; return; }
+
+          const [sumH, countH] = await contract.getAggregateHandles(id);
+          els.handles.textContent = `sum: ${sumH}\ncount: ${countH}`;
+          dlog("agg:handles", { sumH, countH });
+
+          let sum=0n, count=0n;
+          try{
+            // — Public decrypt —
+            FHELOG.decPublicStart([sumH, countH]);
+            const tPub = performance.now();
+            const out = await relayer.publicDecrypt([sumH, countH]);
+            FHELOG.decPublicDone(out, ms(tPub));
+
+            if(Array.isArray(out)){
+              sum = asBigint(out[0]) ?? 0n; 
+              count = asBigint(out[1]) ?? 0n;
+            } else {
+              sum = asBigint(out[sumH]) ?? 0n; 
+              count = asBigint(out[countH]) ?? 0n;
+            }
+          } catch(e){
+            // — User decrypt fallback —
+            dlog("publicDecrypt:failed -> userDecrypt", e?.message || e);
+            const kp = await generateKeypair();
+            const startTs = Math.floor(Date.now()/1000).toString();
+            const days = "7";
+            const eip = relayer.createEIP712(kp.publicKey, [CONTRACT_ADDRESS], startTs, days);
+
+            FHELOG.decUserStart({ handles: [sumH, countH], startTs, days, addr: await provider.getSigner().then(s=>s.getAddress()) });
+
+            const sig = await (await provider.getSigner()).signTypedData(
+              eip.domain,
+              { UserDecryptRequestVerification: eip.types.UserDecryptRequestVerification },
+              eip.message
+            );
+            FHELOG.decUserSig(sig);
+
+            const pairs = [
+              { handle: sumH, contractAddress: CONTRACT_ADDRESS },
+              { handle: countH, contractAddress: CONTRACT_ADDRESS }
+            ];
+
+            const tUsr = performance.now();
+            const dec = await relayer.userDecrypt(
+              pairs,
+              kp.privateKey,
+              kp.publicKey,
+              sig.replace("0x",""),
+              [CONTRACT_ADDRESS],
+              (await provider.getSigner()).address,
+              startTs,
+              days
+            );
+            FHELOG.decUserDone(Object.keys(dec), ms(tUsr));
+
+            sum = asBigint(dec[sumH] ?? dec[Object.keys(dec).find(k=>k.toLowerCase()===String(sumH).toLowerCase())]) ?? 0n;
+            count = asBigint(dec[countH] ?? dec[Object.keys(dec).find(k=>k.toLowerCase()===String(countH).toLowerCase())]) ?? 0n;
+          }
+
+          // — Average & UI —
+          const avg = (count>0n) ? Number(sum)/Number(count) : 0;
+          const pct = Math.min(100, (avg - Number(els.rating.min)) / (Number(els.rating.max)-Number(els.rating.min)) * 100);
+          els.meter.style.width = isFinite(pct)? `${pct}%` : '0%';
+          els.avg.innerHTML = `${avg.toFixed(2)} <small>/ ${els.rating.max}</small>`;
+          FHELOG.average(sum, count, avg);
+        } catch(e){
+          els.handles.textContent = `Error: ${parseRevert(e)}`;
+          els.avg.textContent = '–';
+          els.meter.style.width = '0%';
+        } finally { setBusy(els.btnRefresh, false); }
+      }
+
+      // ====== Owner: add teacher ======
+      async function addTeacher(){
+        try{
+          setBusy(els.btnAddTeacher, true);
+          const id = BigInt(els.newId.value || 0);
+          const name = els.newName.value.trim();
+          if(id<=0n) throw new Error("Provide an id");
+          const owner = await contract.owner();
+          if(owner.toLowerCase() !== (await signer.getAddress()).toLowerCase()){
+            throw new Error('Only owner can perform this action');
+          }
+          try { const exists = await contract.teacherExists(id); if(exists) throw new Error('Teacher already exists'); } catch {}
+          await contract.addTeacher.staticCall(id, name);
+          const tx = await contract.addTeacher(id, name, { nonce: await nextNonce() });
+          await tx.wait();
+          els.ownerHint.textContent = `Added teacher ${id} (${name||"no name"})`;
+        } catch(e){ els.ownerHint.textContent = `Error: ${parseRevert(e)}`; }
+        finally { setBusy(els.btnAddTeacher, false); }
+      }
+
+      // ====== Owner: ensure public ======
+      async function ensurePublic(){
+        try{
+          setBusy(els.btnEnsurePublic, true);
+          const id = BigInt(els.pubId.value || 0);
+          if(id<=0n) throw new Error("Provide an id");
+          const owner = await contract.owner();
+          if(owner.toLowerCase() !== (await signer.getAddress()).toLowerCase()){
+            throw new Error('Only owner can perform this action');
+          }
+          const exists = await contract.teacherExists(id);
+          if(!exists) throw new Error('Teacher not found');
+          await contract.ensurePublic.staticCall(id);
+          const tx = await contract.ensurePublic(id, { nonce: await nextNonce() });
+          await tx.wait();
+          els.ownerHint.textContent = `Re-marked aggregates as public for #${id}`;
+        } catch(e){ els.ownerHint.textContent = `Error: ${parseRevert(e)}`; }
+        finally { setBusy(els.btnEnsurePublic, false); }
+      }
     </script>
   </body>
 </html>
